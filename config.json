@@ -1,0 +1,7 @@
+{
+    "target": "https://show.bilibili.com/platform/detail.html?id=74885&from=pc_ticketlist",
+    "userinfo": {
+        "name": "yourname",
+        "phone": "phonenumber"
+    }
+}
