@@ -3,6 +3,7 @@ import inquirer
 import re
 import qrcode
 import os
+import time
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options
@@ -36,7 +37,7 @@ def init():
 
     print("配置文件读取成功")
     chrome_options = Options()
-    chrome_options.add_argument("--headless")
+    # chrome_options.add_argument("--headless")
     chrome_options.add_argument('--ignore-certificate-errors')
     chrome_options.add_argument('--disable-notifications')
     chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
@@ -61,6 +62,8 @@ def try_login():
         return False
     else:
         print("登录成功")
+        global cookies
+        cookies = web_driver.get_cookies()
         return True
 
 def get_QR():
@@ -131,8 +134,29 @@ def select():
     c.click()
     print('订单已生成')
 
+def check_order():
+    web_driver.get('https://show.bilibili.com/orderlist')
+    id = web_driver.find_element(By.XPATH, "//div[contains(@class, 'order-list')]/div[1]/div[1]/div[2]").text
+    while True:
+        web_driver.refresh()
+        new_id = web_driver.find_element(By.XPATH, "//div[contains(@class, 'order-list')]/div[1]/div[1]/div[2]").text
+        if (new_id != id):
+            print('订单已生成')
+            exit()
+        else:
+            time.sleep(1)
+
+
 
 if __name__ == '__main__':
     init()
     login()
-    select()
+    # cookies = web_driver.get_cookies()
+    # web_driver.quit()
+    # web_driver = webdriver.Chrome()
+    # web_driver.get(config['target'])
+    # for cookie in cookies:
+    #     web_driver.add_cookie(cookie)
+    # web_driver.refresh()
+    check_order()
+    # select()
