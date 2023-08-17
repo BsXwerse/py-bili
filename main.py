@@ -1,16 +1,14 @@
 import json
 from datetime import datetime
-import pickle
 import inquirer
 import re
 import time
 import qrcode
 import os
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
+import concurrent.futures
+import threading
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import TimeoutException
-from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -41,15 +39,14 @@ def init():
         exit()
 
     print("配置文件读取成功")
-    chrome_driver_path = os.path.join(os.getcwd(), 'chromedriver.exe')
-    service = Service(chrome_driver_path)
+    global chrome_options
     chrome_options = Options()
-    # chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--headless")
     chrome_options.add_argument('--ignore-certificate-errors')
     chrome_options.add_argument('--disable-notifications')
     chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
     global web_driver
-    web_driver = webdriver.Chrome(service=service, options=chrome_options)
+    web_driver = webdriver.Chrome(options=chrome_options)
 
 def login():
     while(not try_login()):
@@ -92,17 +89,12 @@ def get_QR():
     qr.add_data(qrUrl)
     qr.print_ascii(invert=True)
 
-def test_login():
-    with open('cookies.pkl', 'rb') as f:
-        cookies = pickle.load(f)
+def select():
+    web_driver.get(config['target'])
     for cookie in cookies:
         web_driver.add_cookie(cookie)
     web_driver.refresh()
 
-
-def select():
-    web_driver.get(config['target'])
-    test_login()
     wait = WebDriverWait(web_driver, 10) 
     wait.until(EC.presence_of_element_located((By.CLASS_NAME, "screens")))
     select_box = web_driver.find_element(By.CLASS_NAME, "login-show-wrapper")
@@ -154,70 +146,20 @@ def select():
         else:
             print("输入的日期时间格式不正确，请重新输入。")
 
-def select_bak():
-    select_box = web_driver.find_element(By.CLASS_NAME, "login-show-wrapper")
-    l1 = select_box.find_elements(By.XPATH, "./ul[1]/li[2]/div")
-    l1 = [div for div in l1 if 'unable' not in div.get_attribute('class')]
-    sessions = [x.text for x in l1];
-    options = [inquirer.List('choice',
-                            message="选择场次",
-                            choices=sessions)]
-    answers = inquirer.prompt(options)['choice']
-    index = [index for index, value in enumerate(l1) if value.text == answers][0]
-    l1[index].click()
-    l2 = select_box.find_elements(By.XPATH, "./ul[2]/li[2]/div")
-    l2 = [div for div in l2 if 'unable' not in div.get_attribute('class')]
-    prices = [x.text for x in l2];
-    options = [inquirer.List('choice',
-                            message="选择价格",
-                            choices=prices)]
-    answers = inquirer.prompt(options)['choice']
-    index = [index for index, value in enumerate(l2) if value.text == answers][0]
-    l2[index].click()
-    num = input('输入购票数量：')
-    try:
-        num = int(num)
-        if (num <= 0):
-            print('请输入大于零的数')
-            exit()
-    except ValueError:
-        print("无效输入，请输入一个整数。")
-        exit()
-    plus = select_box.find_element(By.XPATH, ".//div[contains(@class, 'ticket-count')]/div[contains(@class, 'count-plus')]")
-    while num > 1:
-        plus.click()
-        num-=1
-    buy = select_box.find_element(By.XPATH, ".//div[contains(@class, 'product-buy-wrapper')]/div[1]/div[1]")
-    buy.click()
-    wait = WebDriverWait(web_driver, 10) 
-    wait.until(EC.presence_of_element_located((By.XPATH, "//section[contains(@class, 'contact-block')]")))
-    iss = web_driver.find_elements(By.XPATH, "//section[contains(@class, 'contact-block')]//input")
-    iss[0].clear()
-    iss[0].send_keys(config['userinfo']['name'])
-    iss[1].clear()
-    iss[1].send_keys(config['userinfo']['phone'])
-    c = web_driver.find_element(By.XPATH, "//div[contains(@class, 'service-term')]/span[1]")
-    if 'checked' not in c.get_attribute('class'):
-        c.click()
-    c = web_driver.find_element(By.XPATH, "//div[contains(@class, 'confirm-paybtn')]")
-    c.click()
-    print('订单已生成')
+
 
 def check_order():
-    with open('cookies.pkl', 'rb') as f:
-        cookies = pickle.load(f)
+    time.sleep(2)
     web_driver.get('https://show.bilibili.com/orderlist')
-    for cookie in cookies:
-        web_driver.add_cookie(cookie)
-    web_driver.refresh()
-
     try:
         wait = WebDriverWait(web_driver, 10)
         item = wait.until(EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'order-item')][1]")))
         id = item.find_element(By.XPATH, ".//div[contains(@class, 'order-header-id')]").text
     except TimeoutException:
         id = ''
-    print('id---->'+id)
+
+    wait_begin()
+
     while True:
         web_driver.refresh()
         wait = WebDriverWait(web_driver, 5)
@@ -225,23 +167,26 @@ def check_order():
             item = wait.until(EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'order-item')][1]")))
             if (id == ''):
                 print('订单已生成')
-                exit()
+                os._exit(0)
             new_id = item.find_element(By.XPATH, ".//div[contains(@class, 'order-header-id')]").text
             if (new_id == id):
                 print('wait...')
                 continue
             print('订单已生成')
-            exit()
+            os._exit(0)
         except TimeoutException:
             print('wait...')
 
-def wait():
+def wait_begin():
     print('等待抢票...')
     gap = 0.05
     cur = 0
     btime = begin_time.strftime("%Y-%m-%d %H:%M:%S")
     while True:
         if (datetime.now() >= begin_time):
+            with condition:
+                condition.notify_all()
+            print('\n')
             break
         if (cur >= 1):
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -250,17 +195,62 @@ def wait():
         time.sleep(gap)
         cur += gap
 
+condition = threading.Condition()
+
+def worker(thread_id):
+    driver = webdriver.Chrome(options=chrome_options)
+    driver.get(config['target'])
+    for cookie in cookies:
+        driver.add_cookie(cookie)
+    driver.refresh()
+
+    with condition:
+        condition.wait()
+    print(f'线程{thread_id}开始工作')
+
+    while True:
+        driver.get(config['target'])
+        try:
+            wait = WebDriverWait(driver, 10) 
+            wait.until(EC.presence_of_element_located((By.CLASS_NAME, "screens")))
+            select_box = driver.find_element(By.CLASS_NAME, "login-show-wrapper")
+            l1 = select_box.find_elements(By.XPATH, "./ul[1]/li[2]/div")
+            l1[choose_session_index].click()
+            l2 = select_box.find_elements(By.XPATH, "./ul[2]/li[2]/div")
+            l2[choose_price_index].click()
+            plus = select_box.find_element(By.XPATH, ".//div[contains(@class, 'ticket-count')]/div[contains(@class, 'count-plus')]")
+            num = buy_num
+            while num > 1:
+                plus.click()
+                num-=1
+            buy = select_box.find_element(By.XPATH, ".//div[contains(@class, 'product-buy-wrapper')]/div[1]/div[1]")
+            buy.click()
+            wait = WebDriverWait(driver, 10) 
+            wait.until(EC.presence_of_element_located((By.XPATH, "//section[contains(@class, 'contact-block')]")))
+            iss = driver.find_elements(By.XPATH, "//section[contains(@class, 'contact-block')]//input")
+            iss[0].clear()
+            iss[0].send_keys(config['userinfo']['name'])
+            iss[1].clear()
+            iss[1].send_keys(config['userinfo']['phone'])
+            c = driver.find_element(By.XPATH, "//div[contains(@class, 'service-term')]/span[1]")
+            if 'checked' not in c.get_attribute('class'):
+                c.click()
+            c = driver.find_element(By.XPATH, "//div[contains(@class, 'confirm-paybtn')]")
+            c.click()
+        except Exception:
+            continue
+
+
+def executeWorker():
+    thread_num = config['threadNum']
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=thread_num)
+    for i in range(thread_num):
+        pool.submit(worker, i)
 
 if __name__ == '__main__':
     init()
-    # login()
-    # cookies = web_driver.get_cookies()
-    # with open('cookies.pkl', 'wb') as f:
-    #     pickle.dump(cookies, f)
-
-    # check_order()
+    login()
     select()
-    print(choose_session_index)
-    print(choose_price_index)
-    print(buy_num)
-    wait()
+    executeWorker()
+    check_order()
+
